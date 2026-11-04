@@ -40,11 +40,11 @@ K.db = {
       .order('fecha', { ascending: false }).order('created_at', { ascending: false }));
   },
   // Todas las filas de una tabla (Supabase devuelve máx. 1000 por consulta → paginamos)
-  all: async function (table) {
+  all: async function (table, orderCol) {
     var out = [], size = 1000;
     for (var from = 0; ; from += size) {
       var rows = K.db._check(await K.db.client.from(table).select('*')
-        .order('fecha', { ascending: true }).order('created_at', { ascending: true }).range(from, from + size - 1));
+        .order(orderCol || 'fecha', { ascending: true }).order('created_at', { ascending: true }).range(from, from + size - 1));
       out = out.concat(rows);
       if (rows.length < size) return out;
     }
@@ -59,13 +59,41 @@ K.db = {
     return K.db._check(await K.db.client.from(table).delete().eq('id', id));
   },
 
-  // Último odómetro registrado antes (o en) una fecha, sin contar el registro editado
-  lastOdometer: async function (fecha, excludeId) {
-    var q = K.db.client.from('moto').select('id, odometro, fecha').not('odometro', 'is', null)
-      .lte('fecha', fecha).order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(2);
-    var rows = K.db._check(await q);
-    rows = rows.filter(function (r) { return r.id !== excludeId; });
-    return rows.length ? Number(rows[0].odometro) : null;
+  // ───────── Moto ─────────
+  motos: async function () {
+    return K.db._check(await K.db.client.from('motos').select('*').order('created_at', { ascending: true }));
+  },
+  // Lecturas de odómetro de una moto entre dos fechas (ascendente) + la última anterior a "from"
+  kmRange: async function (motoId, from, to) {
+    var c = K.db.client, res = await Promise.all([
+      c.from('moto_km').select('*').eq('moto_id', motoId).gte('fecha', from).lte('fecha', to).order('fecha', { ascending: true }),
+      c.from('moto_km').select('*').eq('moto_id', motoId).lt('fecha', from).order('fecha', { ascending: false }).limit(1)
+    ]);
+    return { rows: K.db._check(res[0]), prev: K.db._check(res[1])[0] || null };
+  },
+  // Lecturas vecinas de una fecha: la anterior, la del mismo día y la siguiente
+  kmNeighbors: async function (motoId, fecha) {
+    var c = K.db.client, res = await Promise.all([
+      c.from('moto_km').select('*').eq('moto_id', motoId).lt('fecha', fecha).order('fecha', { ascending: false }).limit(1),
+      c.from('moto_km').select('*').eq('moto_id', motoId).eq('fecha', fecha).limit(1),
+      c.from('moto_km').select('*').eq('moto_id', motoId).gt('fecha', fecha).order('fecha', { ascending: true }).limit(1)
+    ]);
+    return { prev: K.db._check(res[0])[0] || null, same: K.db._check(res[1])[0] || null, next: K.db._check(res[2])[0] || null };
+  },
+  // Recargas de una moto entre dos fechas (ascendente) + la última anterior (para comparar precio)
+  cargasRange: async function (motoId, from, to) {
+    var c = K.db.client, res = await Promise.all([
+      c.from('moto_cargas').select('*').eq('moto_id', motoId).gte('fecha', from).lte('fecha', to)
+        .order('fecha', { ascending: true }).order('created_at', { ascending: true }),
+      c.from('moto_cargas').select('*').eq('moto_id', motoId).lt('fecha', from)
+        .order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(1)
+    ]);
+    return { rows: K.db._check(res[0]), prev: K.db._check(res[1])[0] || null };
+  },
+  // Todas las lecturas (de todas las motos) entre dos fechas, ascendente
+  kmAll: async function (from, to) {
+    return K.db._check(await K.db.client.from('moto_km').select('*').gte('fecha', from).lte('fecha', to)
+      .order('fecha', { ascending: true }));
   },
 
   // Nombres de ejercicios usados antes (para autocompletar)

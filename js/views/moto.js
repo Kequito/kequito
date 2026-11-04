@@ -1,102 +1,363 @@
-// 🏍️ Kilómetros en moto (+ gasolina opcional)
+// 🏍️ Moto: mis motos, kilometraje diario por odómetro y recargas de combustible
 window.K = window.K || {};
 K.views = K.views || {};
 
 K.views.moto = {
   title: 'Moto',
+  MARCAS: {
+    'Honda': ['CB190R', 'CB125F', 'XR150L', 'XR190L', 'Wave 110S', 'Navi', 'CBR250R', 'XRE300'],
+    'Yamaha': ['FZ25', 'FZ-S', 'FZ15', 'XTZ125', 'XTZ150', 'YBR125', 'MT-03', 'R15', 'Crypton'],
+    'Bajaj': ['Pulsar NS200', 'Pulsar NS160', 'Pulsar N250', 'Pulsar 180', 'Boxer CT100', 'Boxer BM150', 'Dominar 400', 'Discover 125'],
+    'Suzuki': ['Gixxer 150', 'Gixxer 250', 'GN125', 'DR150', 'AX4'],
+    'TVS': ['Apache RTR 160', 'Apache RTR 200', 'Raider 125', 'Ntorq 125'],
+    'Kawasaki': ['Ninja 400', 'Z400', 'KLX150'],
+    'KTM': ['Duke 200', 'Duke 250', 'Duke 390', 'RC 200'],
+    'Royal Enfield': ['Classic 350', 'Meteor 350', 'Himalayan'],
+    'Ronco': [], 'Wanxin': [], 'Lifan': [], 'Italika': [], 'Otra': []
+  },
+
+  // ───────── Moto activa (recordada en este dispositivo) ─────────
+  active: function (motos) {
+    var id = null;
+    try { id = localStorage.getItem('kq_moto'); } catch (e) {}
+    return motos.filter(function (m) { return m.id === id; })[0] || motos[0] || null;
+  },
+  setActive: function (id) {
+    try { localStorage.setItem('kq_moto', id); } catch (e) {}
+  },
+  label: function (m) {
+    return [m.marca, m.modelo, m.anio].filter(Boolean).join(' ');
+  },
+
+  // Lecturas ascendentes → [{row, km, span}] (km = diferencia con la lectura anterior; null si es la primera)
+  days: function (rows, prev) {
+    var last = prev, out = [];
+    rows.forEach(function (r) {
+      out.push({
+        row: r,
+        km: last ? Math.round((Number(r.odometro) - Number(last.odometro)) * 10) / 10 : null,
+        span: last ? K.d.diff(r.fecha, last.fecha) : 0
+      });
+      last = r;
+    });
+    return out;
+  },
 
   render: async function (root) {
-    var V = K.views.moto, ym = K.state.month, r = K.d.monthRange(ym);
-    var rows = await K.db.list('moto', r[0], r[1]);
-    var km = 0, gas = 0, litros = 0, dias = {};
-    rows.forEach(function (x) {
-      km += Number(x.km || 0); gas += Number(x.gasolina || 0); litros += Number(x.litros || 0);
-      if (Number(x.km) > 0) dias[x.fecha] = 1;
-    });
-    var nDias = Object.keys(dias).length;
-    var lastOdo = rows.filter(function (x) { return x.odometro != null; })[0];
+    var V = K.views.moto;
+    var motos = await K.db.motos();
+    if (!motos.length) {
+      root.innerHTML =
+        '<section class="card accent-moto center">' +
+          '<div class="big">🏍️</div>' +
+          '<h2>Registra tu moto</h2>' +
+          '<p class="muted">Ponle un apodo, elige el modelo y anota su odómetro actual. Desde ahí calculo cuánto recorres cada día.</p>' +
+          '<button class="btn primary block" data-newmoto>Agregar mi moto</button>' +
+        '</section>';
+      root.querySelector('[data-newmoto]').onclick = function () { V.motoForm(null); };
+      return;
+    }
 
-    root.innerHTML = K.monthNav(ym) +
-      '<section class="card accent-moto">' +
-        '<div class="big">' + K.n1(km) + ' <small>km</small></div>' +
-        '<div class="muted">en ' + nDias + ' día' + (nDias === 1 ? '' : 's') +
-          (nDias ? ' · prom. ' + K.n1(km / nDias) + ' km/día' : '') + '</div>' +
-        '<div class="stats">' +
-          '<div><b>' + K.money(gas) + '</b><small>gasolina</small></div>' +
-          '<div><b>' + (litros ? K.n1(litros) + ' L' : '—') + '</b><small>litros</small></div>' +
-          '<div><b>' + (litros && km ? K.n1(km / litros) : '—') + '</b><small>km/L</small></div>' +
+    var moto = V.active(motos), ym = K.state.month, r = K.d.monthRange(ym), t = K.d.today();
+    var res = await Promise.all([
+      K.db.kmRange(moto.id, r[0], r[1]),
+      K.db.cargasRange(moto.id, r[0], r[1]),
+      K.db.kmNeighbors(moto.id, t)
+    ]);
+    var km = res[0], cg = res[1], hoy = res[2];
+    var entries = V.days(km.rows, km.prev);
+
+    // Kilometraje del mes
+    var kmMes = 0, dias = 0;
+    entries.forEach(function (e) { if (e.km != null) { kmMes += e.km; dias += e.span; } });
+    var lastRead = km.rows.length ? km.rows[km.rows.length - 1] : km.prev;
+
+    // Combustible del mes
+    var gal = 0, gasto = 0;
+    cg.rows.forEach(function (c) { gal += Number(c.galones); gasto += Number(c.total); });
+    var ultima = cg.rows[cg.rows.length - 1] || null;
+    var antes = cg.rows.length > 1 ? cg.rows[cg.rows.length - 2] : cg.prev;
+
+    // Estado de hoy
+    var hoyKm = hoy.same && hoy.prev ? Number(hoy.same.odometro) - Number(hoy.prev.odometro) : null;
+    var tab = K.state.motoTab || 'km';
+
+    root.innerHTML =
+      '<button class="moto-head" data-motos>' +
+        '<span class="moto-ico">🏍️</span>' +
+        '<span class="item-main"><b>' + K.esc(moto.apodo) + '</b><small>' + K.esc(V.label(moto) || 'Toca para editar') + '</small></span>' +
+        '<span class="muted">' + (motos.length > 1 ? 'Cambiar ›' : 'Editar ›') + '</span>' +
+      '</button>' +
+
+      '<section class="card accent-moto today-km">' +
+        '<div class="muted small">Kilometraje de hoy</div>' +
+        (hoy.same
+          ? '<div class="big">' + (hoyKm != null ? '+' + K.n1(hoyKm) + ' <small>km</small>' : K.n1(hoy.same.odometro) + ' <small>km</small>') + '</div>' +
+            '<div class="muted small">Odómetro: ' + K.n1(hoy.same.odometro) + ' km' +
+              (hoy.prev && K.d.diff(t, hoy.prev.fecha) > 1 ? ' · desde ' + K.esc(K.d.dayLabel(hoy.prev.fecha)) : '') +
+              (hoyKm == null ? ' · punto de partida' : '') + '</div>'
+          : '<div class="muted">Aún no registras el odómetro de hoy' +
+              (hoy.prev ? ' · último: ' + K.n1(hoy.prev.odometro) + ' km (' + K.esc(K.d.dayLabel(hoy.prev.fecha)) + ')' : '') + '</div>') +
+        '<div class="actions">' +
+          '<button class="btn primary" data-km>📍 ' + (hoy.same ? 'Actualizar odómetro' : 'Registrar odómetro') + '</button>' +
+          '<button class="btn" data-carga>⛽ Recarga</button>' +
         '</div>' +
-        (lastOdo ? '<div class="muted small">Último odómetro: ' + K.n1(lastOdo.odometro) + ' km (' + K.esc(K.d.dayLabel(lastOdo.fecha)) + ')</div>' : '') +
       '</section>' +
-      (rows.length ? K.groupByDay(rows).map(function (g) {
-        var dkm = g.rows.reduce(function (s, x) { return s + Number(x.km || 0); }, 0);
-        return '<h3 class="day-head"><span>' + K.esc(K.d.dayLabel(g.fecha)) + '</span><span>' + K.n1(dkm) + ' km</span></h3>' +
-          '<div class="list">' + g.rows.map(function (x) {
-            var sub = [];
-            if (x.odometro != null) sub.push('odóm. ' + K.n1(x.odometro));
-            if (x.gasolina) sub.push('⛽ ' + K.money(x.gasolina) + (x.litros ? ' · ' + K.n1(x.litros) + ' L' : ''));
-            return '<button class="item" data-id="' + x.id + '">' +
-              '<span class="item-ico">' + (x.gasolina && !Number(x.km) ? '⛽' : '🏍️') + '</span>' +
-              '<span class="item-main"><b>' + K.esc(x.nota || (Number(x.km) ? 'Recorrido' : 'Carga de gasolina')) + '</b>' +
-                (sub.length ? '<small>' + K.esc(sub.join(' · ')) + '</small>' : '') + '</span>' +
-              '<span class="item-val">' + K.n1(x.km) + ' km</span></button>';
-          }).join('') + '</div>';
-      }).join('') : K.empty('Sin recorridos este mes')) +
-      '<button class="fab accent-moto" data-add>＋</button>';
+
+      K.monthNav(ym) +
+      '<section class="card accent-moto">' +
+        '<div class="big">' + K.n1(kmMes) + ' <small>km en el mes</small></div>' +
+        '<div class="muted">' + (dias ? '≈ ' + K.n1(kmMes / dias) + ' km por día (' + dias + ' día' + (dias === 1 ? '' : 's') + ' medidos)' : 'Registra el odómetro dos días para ver tu promedio') + '</div>' +
+        '<div class="stats">' +
+          '<div><b>' + K.money(gasto) + '</b><small>combustible</small></div>' +
+          '<div><b>' + (gal ? K.n1(gal) : '—') + '</b><small>galones</small></div>' +
+          '<div><b>' + (gal && kmMes ? '≈ ' + Math.round(kmMes / gal) : '—') + '</b><small>km/galón</small></div>' +
+        '</div>' +
+        (ultima ? '<div class="muted small">Último precio: <b class="txt">' + K.money(ultima.precio_galon) + '/gal</b>' + V.trend(ultima, antes) +
+          (gal ? ' · prom. del mes ' + K.money(gasto / gal) + '/gal' : '') + '</div>' : '') +
+        (lastRead ? '<div class="muted small">Odómetro actual: ' + K.n1(lastRead.odometro) + ' km</div>' : '') +
+      '</section>' +
+
+      '<div class="seg" data-tabs>' +
+        '<label><input type="radio" name="mtab" value="km"' + (tab === 'km' ? ' checked' : '') + '><span>Recorridos</span></label>' +
+        '<label><input type="radio" name="mtab" value="cargas"' + (tab === 'cargas' ? ' checked' : '') + '><span>Recargas</span></label>' +
+      '</div>' +
+      (tab === 'km' ? V.kmList(entries) : V.cargasList(cg.rows, cg.prev));
 
     K.bindNav(root);
-    root.querySelector('[data-add]').onclick = function () { V.openForm(null); };
-    root.querySelectorAll('.item').forEach(function (b) {
-      b.onclick = function () { V.openForm(rows.filter(function (x) { return x.id === b.dataset.id; })[0]); };
+    root.querySelector('[data-motos]').onclick = function () { V.motosSheet(motos, moto); };
+    root.querySelector('[data-km]').onclick = function () { V.kmForm(moto, null, t); };
+    root.querySelector('[data-carga]').onclick = function () { V.cargaForm(moto, null); };
+    root.querySelectorAll('input[name="mtab"]').forEach(function (i) {
+      i.onchange = function () { K.state.motoTab = i.value; K.app.render(); };
+    });
+    root.querySelectorAll('[data-kid]').forEach(function (b) {
+      b.onclick = function () { V.kmForm(moto, km.rows.filter(function (x) { return x.id === b.dataset.kid; })[0]); };
+    });
+    root.querySelectorAll('[data-cid]').forEach(function (b) {
+      b.onclick = function () { V.cargaForm(moto, cg.rows.filter(function (x) { return x.id === b.dataset.cid; })[0]); };
     });
   },
 
-  openForm: function (row, fecha) {
-    var isNew = !row;
-    row = row || { fecha: fecha || (K.state.month === K.d.ym(K.d.today()) ? K.d.today() : K.state.date) };
+  // ▲▼ del precio por galón respecto a la recarga anterior
+  trend: function (c, prev) {
+    if (!prev) return '';
+    var d = Number(c.precio_galon) - Number(prev.precio_galon);
+    if (Math.abs(d) < 0.005) return ' <span class="muted">= igual</span>';
+    return d > 0 ? ' <span class="up">▲ ' + K.money(d) + '</span>' : ' <span class="down">▼ ' + K.money(-d) + '</span>';
+  },
+
+  kmList: function (entries) {
+    if (!entries.length) return K.empty('Sin registros de odómetro este mes');
+    return '<div class="list">' + entries.slice().reverse().map(function (e) {
+      var val = e.km == null ? 'Inicio' : '+' + K.n1(e.km) + ' km';
+      return '<button class="item" data-kid="' + e.row.id + '">' +
+        '<span class="item-ico">📍</span>' +
+        '<span class="item-main"><b class="cap">' + K.esc(K.d.dayLabel(e.row.fecha)) + '</b>' +
+          '<small>Odómetro ' + K.n1(e.row.odometro) + ' km' + (e.span > 1 ? ' · ' + e.span + ' días desde el anterior' : '') + '</small></span>' +
+        '<span class="item-val">' + val + '</span></button>';
+    }).join('') + '</div>';
+  },
+
+  cargasList: function (rows, prev) {
+    if (!rows.length) return K.empty('Sin recargas este mes');
+    var V = K.views.moto;
+    return '<div class="list">' + rows.map(function (c, i) {
+      return { c: c, prev: i ? rows[i - 1] : prev };
+    }).reverse().map(function (x) {
+      var c = x.c;
+      return '<button class="item" data-cid="' + c.id + '">' +
+        '<span class="item-ico">⛽</span>' +
+        '<span class="item-main"><b class="cap">' + K.esc(K.d.dayLabel(c.fecha)) + ' · ' + K.money(c.total) + '</b>' +
+          '<small>' + K.n1(c.galones) + ' gal' + (c.nota ? ' · ' + K.esc(c.nota) : '') + '</small></span>' +
+        '<span class="item-val right">' + K.money(c.precio_galon) + '<small>/gal' + V.trend(c, x.prev) + '</small></span></button>';
+    }).join('') + '</div>';
+  },
+
+  // ───────── Mis motos ─────────
+  motosSheet: function (motos, current) {
+    var V = K.views.moto;
+    K.sheet.open({
+      title: 'Mis motos',
+      submitLabel: 'Listo',
+      html:
+        '<div class="list">' + motos.map(function (m) {
+          return '<button type="button" class="item" data-pick="' + m.id + '">' +
+            '<span class="item-ico">' + (m.id === current.id ? '✅' : '🏍️') + '</span>' +
+            '<span class="item-main"><b>' + K.esc(m.apodo) + '</b><small>' + K.esc(V.label(m)) + '</small></span></button>';
+        }).join('') + '</div>' +
+        '<button type="button" class="btn block" data-edit>✏️ Editar "' + K.esc(current.apodo) + '"</button>' +
+        '<button type="button" class="btn ghost block" data-add>＋ Agregar otra moto</button>',
+      mount: function (f) {
+        f.querySelectorAll('[data-pick]').forEach(function (b) {
+          b.onclick = function () { V.setActive(b.dataset.pick); K.sheet.close(); K.app.render(); };
+        });
+        f.querySelector('[data-edit]').onclick = function () { V.motoForm(current); };
+        f.querySelector('[data-add]').onclick = function () { V.motoForm(null); };
+      },
+      submit: function () { K.sheet.close(); return false; }
+    });
+  },
+
+  motoForm: function (moto) {
+    var V = K.views.moto, isNew = !moto;
+    moto = moto || {};
+    var marcas = Object.keys(V.MARCAS);
+    K.sheet.open({
+      title: isNew ? 'Nueva moto' : 'Editar moto',
+      html:
+        K.field('Apodo', '<input name="apodo" placeholder="ej. La Negra, Relámpago…" value="' + K.esc(moto.apodo || '') + '">') +
+        K.field('Marca', '<select name="marca"><option value="">Elige…</option>' + marcas.map(function (m) {
+          return '<option' + (m === moto.marca ? ' selected' : '') + '>' + m + '</option>';
+        }).join('') + '</select>') +
+        K.field('Modelo', '<input name="modelo" list="modeloList" placeholder="ej. CB190R" value="' + K.esc(moto.modelo || '') + '"><datalist id="modeloList"></datalist>') +
+        K.field('Año (opcional)', '<input name="anio" inputmode="numeric" placeholder="ej. 2022" value="' + (moto.anio || '') + '">') +
+        (isNew ? K.field('Odómetro actual (km)', '<input name="odometro" inputmode="decimal" placeholder="lo que marca el tablero">',
+          'Será el punto de partida para calcular tus recorridos.') : ''),
+      mount: function (f) {
+        function fill() {
+          f.querySelector('#modeloList').innerHTML = (V.MARCAS[f.marca.value] || []).map(function (m) {
+            return '<option value="' + K.esc(m) + '">';
+          }).join('');
+        }
+        f.marca.onchange = fill; fill();
+        if (isNew) setTimeout(function () { f.apodo.focus(); }, 300);
+      },
+      submit: async function (f) {
+        var apodo = f.apodo.value.trim();
+        if (!apodo) throw new Error('Ponle un apodo a tu moto :3');
+        var anio = K.num(f.anio.value);
+        var data = { apodo: apodo, marca: f.marca.value || null, modelo: f.modelo.value.trim() || null, anio: anio ? Math.round(anio) : null };
+        if (!isNew) {
+          await K.db.update('motos', moto.id, data);
+          K.toast('Moto actualizada');
+          return;
+        }
+        var odo = K.num(f.odometro.value);
+        if (odo == null || odo < 0) throw new Error('Escribe el odómetro actual');
+        var m = await K.db.insert('motos', data);
+        await K.db.insert('moto_km', { moto_id: m.id, fecha: K.d.today(), odometro: odo });
+        V.setActive(m.id);
+        K.toast(apodo + ' registrada 🏍️');
+      },
+      onDelete: isNew ? null : function () {
+        if (!confirm('Se borrarán también TODOS sus registros de km y recargas (y los gastos de combustible). ¿Seguro?')) return false;
+        return K.db.remove('motos', moto.id).then(function () { K.toast('Moto eliminada'); });
+      }
+    });
+  },
+
+  // ───────── Odómetro ─────────
+  kmForm: function (moto, row, fecha) {
+    var V = K.views.moto;
+    row = row || { fecha: fecha || K.d.today() };
+    K.sheet.open({
+      title: row.id ? 'Editar odómetro' : 'Odómetro del día',
+      html:
+        K.field('Fecha', '<input type="date" name="fecha" value="' + row.fecha + '">') +
+        K.field('¿Cuánto marca el odómetro? (km)', '<input name="odometro" inputmode="decimal" placeholder="ej. 12345" value="' + (row.odometro != null ? row.odometro : '') + '">') +
+        '<div class="preview" data-preview></div>',
+      mount: function (f) {
+        var nb = null, seq = 0;
+        function show() {
+          var p = f.querySelector('[data-preview]'), odo = K.num(f.odometro.value);
+          if (!nb) { p.innerHTML = ''; return; }
+          var lines = [];
+          if (nb.prev) {
+            lines.push('Anterior: <b>' + K.n1(nb.prev.odometro) + ' km</b> (' + K.esc(K.d.dayLabel(nb.prev.fecha)) + ')');
+            if (odo != null) {
+              var d = odo - Number(nb.prev.odometro);
+              lines.push(d >= 0 ? 'Recorrido: <b class="ok">+' + K.n1(d) + ' km</b>' + (K.d.diff(f.fecha.value, nb.prev.fecha) > 1 ? ' en ' + K.d.diff(f.fecha.value, nb.prev.fecha) + ' días' : '')
+                               : '<span class="up">Es menor que el anterior 🤔</span>');
+            }
+          } else lines.push('Este será tu primer registro (punto de partida).');
+          if (nb.same && nb.same.id !== row.id) lines.push('Ya registraste <b>' + K.n1(nb.same.odometro) + ' km</b> este día; se guardará el mayor.');
+          p.innerHTML = lines.join('<br>');
+        }
+        function load() {
+          var my = ++seq;
+          K.db.kmNeighbors(moto.id, f.fecha.value || K.d.today()).then(function (n) {
+            if (my === seq) { nb = n; show(); }
+          }).catch(function () {});
+        }
+        f.fecha.onchange = load;
+        f.odometro.oninput = show;
+        load();
+        if (!row.id) setTimeout(function () { f.odometro.focus(); }, 300);
+      },
+      submit: async function (f) {
+        var fecha = f.fecha.value || K.d.today(), odo = K.num(f.odometro.value);
+        if (odo == null || odo < 0) throw new Error('Escribe lo que marca el odómetro');
+        var nb = await K.db.kmNeighbors(moto.id, fecha);
+        if (nb.prev && odo < Number(nb.prev.odometro))
+          throw new Error('No puede ser menor que ' + K.n1(nb.prev.odometro) + ' km (' + K.d.dayLabel(nb.prev.fecha) + ')');
+        if (nb.next && odo > Number(nb.next.odometro))
+          throw new Error('No puede ser mayor que ' + K.n1(nb.next.odometro) + ' km (' + K.d.dayLabel(nb.next.fecha) + ')');
+        var data = { fecha: fecha, odometro: odo, updated_at: new Date().toISOString() };
+        var prevKm = nb.prev ? ' (+' + K.n1(odo - Number(nb.prev.odometro)) + ' km)' : '';
+
+        if (row.id) {
+          if (nb.same && nb.same.id !== row.id) throw new Error('Ya hay un registro ese día; edítalo a él');
+          await K.db.update('moto_km', row.id, data);
+          K.toast('Odómetro actualizado' + prevKm);
+        } else if (nb.same) {
+          if (odo < Number(nb.same.odometro))
+            throw new Error('Ese día ya marcaste ' + K.n1(nb.same.odometro) + ' km. El nuevo debe ser mayor (para corregirlo, toca el registro en la lista).');
+          await K.db.update('moto_km', nb.same.id, data);
+          K.toast('Odómetro actualizado' + prevKm + ' 📍');
+        } else {
+          await K.db.insert('moto_km', { moto_id: moto.id, fecha: fecha, odometro: odo });
+          K.toast('Odómetro guardado' + prevKm + ' 📍');
+        }
+      },
+      onDelete: row.id ? function () { return K.db.remove('moto_km', row.id).then(function () { K.toast('Registro eliminado'); }); } : null
+    });
+  },
+
+  // Desde la pantalla Hoy
+  quickKm: async function (fecha) {
+    var motos = await K.db.motos();
+    if (!motos.length) { location.hash = 'moto'; return; }
+    K.views.moto.kmForm(K.views.moto.active(motos), null, fecha);
+  },
+
+  // ───────── Recargas ─────────
+  cargaForm: function (moto, row) {
+    row = row || { fecha: K.state.month === K.d.ym(K.d.today()) ? K.d.today() : K.state.date };
     var v = function (x) { return x != null ? x : ''; };
     K.sheet.open({
-      title: row.id ? 'Editar recorrido' : 'Nuevo recorrido',
+      title: row.id ? 'Editar recarga' : 'Recarga de combustible',
       html:
-        K.field('Kilómetros recorridos', '<input name="km" inputmode="decimal" placeholder="ej. 24.5" value="' + v(row.km) + '">',
-          'Si lo dejas vacío y pones el odómetro, lo calculo con el último odómetro registrado.') +
-        K.field('Odómetro (opcional)', '<input name="odometro" inputmode="decimal" placeholder="km del tablero" value="' + v(row.odometro) + '">') +
         '<div class="row2">' +
-          K.field('Gasolina S/ (opcional)', '<input name="gasolina" inputmode="decimal" placeholder="0.00" value="' + v(row.gasolina) + '">') +
-          K.field('Litros (opcional)', '<input name="litros" inputmode="decimal" placeholder="0.0" value="' + v(row.litros) + '">') +
+          K.field('Galones', '<input name="galones" inputmode="decimal" placeholder="ej. 1.5" value="' + v(row.galones) + '">') +
+          K.field('Pagaste (S/)', '<input name="total" inputmode="decimal" placeholder="ej. 25.00" value="' + v(row.total) + '">') +
         '</div>' +
-        (isNew ? '<label class="check"><input type="checkbox" name="comoGasto" checked> Registrar la gasolina también en Gastos</label>' : '') +
-        K.field('Nota (opcional)', '<input name="nota" placeholder="ej. casa → trabajo" value="' + K.esc(row.nota || '') + '">') +
-        K.field('Fecha', '<input type="date" name="fecha" value="' + row.fecha + '">'),
-      mount: function (f) { if (isNew) setTimeout(function () { f.km.focus(); }, 300); },
-      submit: async function (f) {
-        var data = {
-          km: K.num(f.km.value),
-          odometro: K.num(f.odometro.value),
-          gasolina: K.num(f.gasolina.value),
-          litros: K.num(f.litros.value),
-          nota: f.nota.value.trim() || null,
-          fecha: f.fecha.value || K.d.today()
-        };
-        if (data.km == null && data.odometro != null) {
-          var prev = await K.db.lastOdometer(data.fecha, row.id);
-          if (prev == null) throw new Error('No hay un odómetro anterior para calcular. Escribe los km.');
-          if (data.odometro < prev) throw new Error('El odómetro (' + data.odometro + ') es menor que el último (' + prev + ')');
-          data.km = Math.round((data.odometro - prev) * 10) / 10;
+        '<div class="preview" data-preview></div>' +
+        K.field('Grifo / nota (opcional)', '<input name="nota" placeholder="ej. Primax, 90 oct." value="' + K.esc(row.nota || '') + '">') +
+        K.field('Fecha', '<input type="date" name="fecha" value="' + row.fecha + '">') +
+        '<p class="muted small">Se registra automáticamente en Gastos como “Combustible”.</p>',
+      mount: function (f) {
+        function show() {
+          var g = K.num(f.galones.value), t = K.num(f.total.value);
+          f.querySelector('[data-preview]').innerHTML = g > 0 && t > 0
+            ? 'Precio por galón: <b class="ok">' + K.money(t / g) + '</b>' : '';
         }
-        if (data.km == null) {
-          if (!data.gasolina) throw new Error('Escribe los km (o la gasolina si solo cargaste)');
-          data.km = 0;
-        }
-        if (data.km < 0) throw new Error('Los km no pueden ser negativos');
-        if (row.id) await K.db.update('moto', row.id, data);
-        else await K.db.insert('moto', data);
-        if (isNew && f.comoGasto.checked && data.gasolina > 0) {
-          await K.db.insert('gastos', { monto: data.gasolina, categoria: 'Moto', nota: 'Gasolina', fecha: data.fecha });
-        }
-        K.toast(row.id ? 'Recorrido actualizado' : data.km + ' km guardados ✅');
+        f.galones.oninput = f.total.oninput = show;
+        show();
+        if (!row.id) setTimeout(function () { f.galones.focus(); }, 300);
       },
-      onDelete: row.id ? function () { return K.db.remove('moto', row.id).then(function () { K.toast('Recorrido eliminado'); }); } : null
+      submit: async function (f) {
+        var g = K.num(f.galones.value), t = K.num(f.total.value);
+        if (!(g > 0)) throw new Error('Escribe cuántos galones echaste');
+        if (!(t > 0)) throw new Error('Escribe cuánto pagaste');
+        var data = { galones: g, total: t, nota: f.nota.value.trim() || null, fecha: f.fecha.value || K.d.today() };
+        if (row.id) await K.db.update('moto_cargas', row.id, data);
+        else await K.db.insert('moto_cargas', Object.assign({ moto_id: moto.id }, data));
+        K.toast((row.id ? 'Recarga actualizada' : 'Recarga guardada') + ' · ' + K.money(t / g) + '/gal ⛽');
+      },
+      onDelete: row.id ? function () {
+        return K.db.remove('moto_cargas', row.id).then(function () { K.toast('Recarga eliminada (y su gasto)'); });
+      } : null
     });
   }
 };

@@ -10,13 +10,22 @@ K.views.hoy = {
     var res = await Promise.all([
       K.db.list('gastos', r[0], r[1]),
       K.db.list('comidas', date, date),
-      K.db.list('moto', r[0], r[1]),
+      K.db.kmAll(K.d.add(r[0], -62), date),
       K.db.list('gym', K.d.add(date, -400), K.d.today(), 'id, fecha, grupos, modo, ejercicios, duracion, nota, created_at')
     ]);
     var gastos = res[0], comidas = res[1], moto = res[2], gym = res[3];
     var sum = function (rows, k) { return rows.reduce(function (s, x) { return s + Number(x[k] || 0); }, 0); };
     var gHoy = gastos.filter(function (x) { return x.fecha === date; });
-    var mHoy = moto.filter(function (x) { return x.fecha === date; });
+    // Km por lectura = odómetro − lectura anterior de la misma moto
+    var porMoto = {}, kmHoy = 0, kmMes = 0, mHoy = [];
+    moto.forEach(function (x) { (porMoto[x.moto_id] = porMoto[x.moto_id] || []).push(x); });
+    Object.keys(porMoto).forEach(function (id) {
+      K.views.moto.days(porMoto[id], null).forEach(function (e) {
+        if (e.km == null) return;
+        if (K.d.ym(e.row.fecha) === ym) kmMes += e.km;
+        if (e.row.fecha === date) { kmHoy += e.km; mHoy.push(e); }
+      });
+    });
     var gymHoy = gym.filter(function (x) { return x.fecha === date; });
     var st = K.views.gym.stats(gym.map(function (x) { return x.fecha; }));
     var gymMes = {};
@@ -39,8 +48,8 @@ K.views.hoy = {
         // Moto
         '<section class="tile accent-moto" data-go="moto">' +
           '<div class="tile-top"><span>🏍️ Moto</span><button class="mini-add" data-quick="moto">＋</button></div>' +
-          '<div class="big">' + K.n1(sum(mHoy, 'km')) + ' <small>km</small></div>' +
-          '<div class="muted small">mes ' + K.n1(sum(moto, 'km')) + ' km</div>' +
+          '<div class="big">' + K.n1(kmHoy) + ' <small>km</small></div>' +
+          '<div class="muted small">mes ' + K.n1(kmMes) + ' km</div>' +
         '</section>' +
         // Gym
         '<section class="tile accent-gym" data-go="gym">' +
@@ -66,14 +75,15 @@ K.views.hoy = {
             '<span class="item-main"><b>' + K.esc(x.descripcion) + '</b><small>' + K.esc(x.tipo) + '</small></span></div>';
         }).join('') +
         gHoy.map(function (x) {
-          return '<div class="item static"><span class="item-ico">' + K.views.gastos.icon(x.categoria) + '</span>' +
+          return '<div class="item static"><span class="item-ico">' + (x.origen === 'moto' ? '⛽' : K.views.gastos.icon(x.categoria)) + '</span>' +
             '<span class="item-main"><b>' + K.esc(x.nota || x.categoria) + '</b><small>Gasto</small></span>' +
             '<span class="item-val">' + K.money(x.monto) + '</span></div>';
         }).join('') +
-        mHoy.map(function (x) {
+        mHoy.map(function (e) {
           return '<div class="item static"><span class="item-ico">🏍️</span>' +
-            '<span class="item-main"><b>' + K.esc(x.nota || 'Recorrido') + '</b><small>Moto</small></span>' +
-            '<span class="item-val">' + K.n1(x.km) + ' km</span></div>';
+            '<span class="item-main"><b>Recorrido</b><small>Odómetro ' + K.n1(e.row.odometro) + ' km' +
+              (e.span > 1 ? ' · ' + e.span + ' días' : '') + '</small></span>' +
+            '<span class="item-val">+' + K.n1(e.km) + ' km</span></div>';
         }).join('') +
         gymHoy.map(function (x) {
           return '<div class="item static"><span class="item-ico">🏋️</span>' +
@@ -93,6 +103,7 @@ K.views.hoy = {
         e.stopPropagation();
         var v = K.views[b.dataset.quick];
         if (b.dataset.quick === 'comidas') v.openForm(null, date, K.views.comidas.guessTipo());
+        else if (b.dataset.quick === 'moto') K.views.moto.quickKm(date).catch(function (err) { K.toast(err.message, true); });
         else if (b.dataset.quick === 'gym' && gymHoy.length) v.openForm(gymHoy[0]);
         else v.openForm(null, date);
       };

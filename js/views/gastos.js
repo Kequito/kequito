@@ -52,7 +52,7 @@ K.views.gastos = {
         return '<h3 class="day-head"><span>' + K.esc(K.d.dayLabel(g.fecha)) + '</span><span>' + K.money(dayTotal) + '</span></h3>' +
           '<div class="list">' + g.rows.map(function (x) {
             return '<button class="item" data-id="' + x.id + '">' +
-              '<span class="item-ico">' + V.icon(x.categoria) + '</span>' +
+              '<span class="item-ico">' + (x.origen === 'moto' ? '⛽' : V.icon(x.categoria)) + '</span>' +
               '<span class="item-main"><b>' + K.esc(x.nota || x.categoria) + '</b>' +
                 (x.nota ? '<small>' + K.esc(x.categoria) + '</small>' : '') + '</span>' +
               '<span class="item-val">' + K.money(x.monto) + '</span></button>';
@@ -69,6 +69,20 @@ K.views.gastos = {
 
   openForm: function (row, fecha) {
     var V = K.views.gastos;
+    if (row && row.origen === 'moto') {
+      K.sheet.open({
+        title: 'Gasto de combustible',
+        submitLabel: 'Ir a Moto',
+        html: '<div class="preview">⛽ <b>' + K.money(row.monto) + '</b> · ' + K.esc(row.nota || '') + '<br>' +
+          'Este gasto se creó desde una recarga en <b>Moto</b>. Para cambiarlo o borrarlo, hazlo desde Moto → Recargas y se actualiza aquí solo.</div>',
+        submit: function () {
+          K.state.month = K.d.ym(row.fecha); K.state.motoTab = 'cargas';
+          K.sheet.close(); location.hash = 'moto';
+          return false;
+        }
+      });
+      return;
+    }
     row = row || { fecha: fecha || (K.state.month === K.d.ym(K.d.today()) ? K.d.today() : K.state.date), categoria: 'Comida' };
     K.sheet.open({
       title: row.id ? 'Editar gasto' : 'Nuevo gasto',

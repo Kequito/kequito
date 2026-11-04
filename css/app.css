@@ -142,6 +142,25 @@ main { padding: 4px 16px calc(var(--safe-bottom) + 96px); max-width: 640px; marg
 .empty { text-align: center; color: var(--muted); padding: 32px 16px; background: var(--card); border-radius: var(--r); }
 .loading { text-align: center; color: var(--muted); padding: 48px 0; }
 
+/* ───────── Moto ───────── */
+.moto-head {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 0;
+  background: var(--card); border-radius: var(--r); padding: 12px 14px; margin-bottom: 14px;
+}
+.moto-ico { font-size: 28px; }
+.actions { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; margin-top: 12px; }
+.actions .btn { padding: 12px 8px; }
+.today-km .big { margin-top: 2px; }
+.preview { background: var(--card); border-radius: 12px; padding: 10px 12px; margin: -4px 0 14px; font-size: 14px; line-height: 1.6; }
+.preview:empty { display: none; }
+.ok { color: var(--comidas); }
+.up { color: var(--danger); }
+.down { color: var(--comidas); }
+.txt { color: var(--text); }
+.cap { text-transform: capitalize; }
+.item-val.right { text-align: right; }
+.item-val small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+
 /* ───────── Calendario gym ───────── */
 .cal-head, .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; }
 .cal-head { margin-top: 14px; font-size: 11px; color: var(--muted); }

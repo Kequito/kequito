@@ -121,7 +121,8 @@ K.app = {
   backup: async function () {
     try {
       var out = { app: 'Kequito', version: APP_VERSION, exportado: new Date().toISOString() };
-      for (var t of ['gastos', 'comidas', 'moto', 'gym']) out[t] = await K.db.all(t);
+      out.motos = await K.db.all('motos', 'created_at');
+      for (var t of ['gastos', 'comidas', 'moto_km', 'moto_cargas', 'gym']) out[t] = await K.db.all(t);
       var blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
