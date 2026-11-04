@@ -3,5 +3,5 @@
 window.K = window.K || {};
 K.config = {
   supabaseUrl: 'PEGA_AQUI_TU_URL',       // ej: https://abcdefgh.supabase.co
-  supabaseKey: 'PEGA_AQUI_TU_ANON_KEY'   // ej: eyJhbGciOi...
+  supabaseKey: 'sb_publishable_Tx8fMK7iMOLjLMDOMOZDkw_6VGHKrjr'
 };
