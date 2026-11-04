@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Kequito</title>
+  <meta name="theme-color" content="#0f1115">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Kequito">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <script>
+    // Cambiar en cada actualización de JS/CSS (formato AAAA.MM.DD + letra)
+    window.APP_VERSION = '2026.11.04a';
+    document.write('<link rel="stylesheet" href="css/app.css?v=' + APP_VERSION + '">');
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <h1 id="title">Kequito</h1>
+    <button id="btnMenu" class="icon-btn" aria-label="Opciones" hidden>⋯</button>
+  </header>
+
+  <main id="view"></main>
+
+  <nav class="tabbar" id="tabbar" hidden>
+    <a href="#hoy"     data-tab="hoy"><span>🏠</span>Hoy</a>
+    <a href="#gastos"  data-tab="gastos"><span>💸</span>Gastos</a>
+    <a href="#comidas" data-tab="comidas"><span>🍽️</span>Comidas</a>
+    <a href="#moto"    data-tab="moto"><span>🏍️</span>Moto</a>
+    <a href="#gym"     data-tab="gym"><span>🏋️</span>Gym</a>
+  </nav>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script>
+    ['js/config.js', 'js/ui.js', 'js/db.js',
+     'js/views/hoy.js', 'js/views/gastos.js', 'js/views/comidas.js',
+     'js/views/moto.js', 'js/views/gym.js', 'js/app.js'
+    ].forEach(function (f) { document.write('<script src="' + f + '?v=' + APP_VERSION + '"><\/script>'); });
+  </script>
+</body>
+</html>
