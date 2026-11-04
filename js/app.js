@@ -33,8 +33,8 @@ K.app = {
     var view = document.getElementById('view');
     view.innerHTML =
       '<form class="card login" id="loginForm">' +
-        '<div class="logo">K</div>' +
-        '<h2>Hola :3</h2>' +
+        '<img class="logo" src="icons/keke.svg" alt="Keke">' +
+        '<h2>Hola Kequito :3</h2>' +
         '<p class="muted">Entra para ver tu día a día</p>' +
         K.field('Correo', '<input name="email" type="email" autocomplete="username" autocapitalize="off">') +
         K.field('Contraseña', '<input name="password" type="password" autocomplete="current-password">') +

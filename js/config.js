@@ -2,6 +2,6 @@
 // (la "anon public key" es pública por diseño; tus datos están protegidos por las reglas RLS del script SQL)
 window.K = window.K || {};
 K.config = {
-  supabaseUrl: 'PEGA_AQUI_TU_URL',       // ej: https://abcdefgh.supabase.co
+  supabaseUrl: 'https://baemetwnxudfsrbhccsn.supabase.co',
   supabaseKey: 'sb_publishable_Tx8fMK7iMOLjLMDOMOZDkw_6VGHKrjr'
 };

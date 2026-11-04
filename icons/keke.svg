@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="kb" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9b8aff"/>
+      <stop offset="1" stop-color="#ff7ab8"/>
+    </linearGradient>
+  </defs>
+  <!-- sombrita -->
+  <ellipse cx="100" cy="186" rx="52" ry="7" fill="#000" opacity=".12"/>
+  <!-- antenita con corazón -->
+  <path d="M100 40 Q93 22 108 14" fill="none" stroke="#9b8aff" stroke-width="6" stroke-linecap="round"/>
+  <path d="M110 18 c-3-6-12-5-12 2 c0 5 6 8 12 13 c6-5 12-8 12-13 c0-7-9-8-12-2z" fill="#ff5fa2"/>
+  <!-- cuerpo -->
+  <path d="M100 36 C152 36 180 72 180 116 C180 160 146 180 100 180 C54 180 20 160 20 116 C20 72 48 36 100 36Z" fill="url(#kb)"/>
+  <!-- brillo -->
+  <ellipse cx="66" cy="68" rx="20" ry="10" transform="rotate(-28 66 68)" fill="#fff" opacity=".35"/>
+  <!-- ojitos -->
+  <ellipse cx="72" cy="108" rx="11" ry="14" fill="#2a1c45"/>
+  <ellipse cx="128" cy="108" rx="11" ry="14" fill="#2a1c45"/>
+  <circle cx="76" cy="102" r="4.2" fill="#fff"/>
+  <circle cx="132" cy="102" r="4.2" fill="#fff"/>
+  <circle cx="69" cy="114" r="2" fill="#fff"/>
+  <circle cx="125" cy="114" r="2" fill="#fff"/>
+  <!-- cachetitos -->
+  <ellipse cx="50" cy="132" rx="13" ry="8" fill="#ff4f9a" opacity=".5"/>
+  <ellipse cx="150" cy="132" rx="13" ry="8" fill="#ff4f9a" opacity=".5"/>
+  <!-- boquita :3 -->
+  <path d="M87 128 Q93.5 139 100 129 Q106.5 139 113 128" fill="none" stroke="#2a1c45" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
