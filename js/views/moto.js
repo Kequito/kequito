@@ -59,12 +59,14 @@ K.views.moto = {
     }
 
     var moto = V.active(motos), ym = K.state.month, r = K.d.monthRange(ym), t = K.d.today();
+    // Se traen ~3 meses antes del mes elegido para calcular el costo por km con más datos
     var res = await Promise.all([
-      K.db.kmRange(moto.id, r[0], r[1]),
-      K.db.cargasRange(moto.id, r[0], r[1]),
+      K.db.kmRange(moto.id, K.d.add(r[0], -V.VENTANA), r[1]),
+      K.db.cargasRange(moto.id, K.d.add(r[0], -V.VENTANA), r[1]),
       K.db.kmNeighbors(moto.id, t)
     ]);
-    var km = res[0], cg = res[1], hoy = res[2];
+    var hoy = res[2], costo = V.costoKm(res[0], res[1].rows);
+    var km = V.delMes(res[0], r[0]), cg = V.delMes(res[1], r[0]);
     var entries = V.days(km.rows, km.prev);
 
     // Kilometraje del mes
@@ -82,6 +84,10 @@ K.views.moto = {
     var hoyKm = hoy.same && hoy.prev ? Number(hoy.same.odometro) - Number(hoy.prev.odometro) : null;
     var tab = K.state.motoTab || 'km';
 
+    // Gasto diario aprox. = km por día (del mes, o del periodo si el mes no tiene datos) × costo por km
+    var kmDia = dias ? kmMes / dias : costo ? costo.km / costo.dias : 0;
+    var diario = costo && kmDia ? kmDia * costo.porKm : null;
+
     root.innerHTML =
       '<button class="moto-head" data-motos>' +
         '<span class="moto-ico">🏍️</span>' +
@@ -95,7 +101,8 @@ K.views.moto = {
           ? '<div class="big">' + (hoyKm != null ? '+' + K.n1(hoyKm) + ' <small>km</small>' : K.n1(hoy.same.odometro) + ' <small>km</small>') + '</div>' +
             '<div class="muted small">Odómetro: ' + K.n1(hoy.same.odometro) + ' km' +
               (hoy.prev && K.d.diff(t, hoy.prev.fecha) > 1 ? ' · desde ' + K.esc(K.d.dayLabel(hoy.prev.fecha)) : '') +
-              (hoyKm == null ? ' · punto de partida' : '') + '</div>'
+              (hoyKm == null ? ' · punto de partida' : '') +
+              (hoyKm != null && costo ? ' · ≈ <b class="txt">' + K.money(hoyKm * costo.porKm) + '</b> en combustible' : '') + '</div>'
           : '<div class="muted">Aún no registras el odómetro de hoy' +
               (hoy.prev ? ' · último: ' + K.n1(hoy.prev.odometro) + ' km (' + K.esc(K.d.dayLabel(hoy.prev.fecha)) + ')' : '') + '</div>') +
         '<div class="actions">' +
@@ -108,6 +115,14 @@ K.views.moto = {
       '<section class="card accent-moto">' +
         '<div class="big">' + K.n1(kmMes) + ' <small>km en el mes</small></div>' +
         '<div class="muted">' + (dias ? '≈ ' + K.n1(kmMes / dias) + ' km por día (' + dias + ' día' + (dias === 1 ? '' : 's') + ' medidos)' : 'Registra el odómetro dos días para ver tu promedio') + '</div>' +
+        '<div class="daily">' +
+          (diario != null
+            ? '<div><span class="muted small">Gasto diario en combustible</span><b>≈ ' + K.money(diario) + ' <small>/día</small></b></div>' +
+              '<div class="right"><span class="muted small">por km</span><b>' + K.money(costo.porKm) + '</b></div>' +
+              '<p class="muted small">≈ ' + K.money(diario * 30) + ' al mes · calculado con ' + K.money(costo.soles) + ' de combustible en ' +
+                K.n1(costo.km) + ' km desde ' + K.esc(K.d.dayLabel(costo.desde)) + '</p>'
+            : '<p class="muted small">💸 Tu gasto diario en combustible aparecerá cuando tengas una recarga y el odómetro registrado en días posteriores.</p>') +
+        '</div>' +
         '<div class="stats">' +
           '<div><b>' + K.money(gasto) + '</b><small>combustible</small></div>' +
           '<div><b>' + (gal ? K.n1(gal) : '—') + '</b><small>galones</small></div>' +
@@ -122,7 +137,7 @@ K.views.moto = {
         '<label><input type="radio" name="mtab" value="km"' + (tab === 'km' ? ' checked' : '') + '><span>Recorridos</span></label>' +
         '<label><input type="radio" name="mtab" value="cargas"' + (tab === 'cargas' ? ' checked' : '') + '><span>Recargas</span></label>' +
       '</div>' +
-      (tab === 'km' ? V.kmList(entries) : V.cargasList(cg.rows, cg.prev));
+      (tab === 'km' ? V.kmList(entries, costo) : V.cargasList(cg.rows, cg.prev));
 
     K.bindNav(root);
     root.querySelector('[data-motos]').onclick = function () { V.motosSheet(motos, moto); };
@@ -147,7 +162,32 @@ K.views.moto = {
     return d > 0 ? ' <span class="up">▲ ' + K.money(d) + '</span>' : ' <span class="down">▼ ' + K.money(-d) + '</span>';
   },
 
-  kmList: function (entries) {
+  // Días hacia atrás usados para calcular el costo por km
+  VENTANA: 90,
+
+  // Separa lo del mes ({rows, prev} desde "desde") de un rango más largo
+  delMes: function (w, desde) {
+    var antes = w.rows.filter(function (x) { return x.fecha < desde; });
+    return {
+      rows: w.rows.filter(function (x) { return x.fecha >= desde; }),
+      prev: antes.length ? antes[antes.length - 1] : w.prev
+    };
+  },
+
+  // Costo por km = soles en recargas ÷ km recorridos entre la primera y la última lectura del periodo.
+  // Cuenta las recargas desde el día de la primera lectura hasta el día antes de la última
+  // (lo que se echa el último día se gasta en km que todavía no se registran).
+  costoKm: function (w, cargas) {
+    var all = (w.prev ? [w.prev] : []).concat(w.rows);
+    if (all.length < 2) return null;
+    var first = all[0], last = all[all.length - 1];
+    var km = Number(last.odometro) - Number(first.odometro), soles = 0;
+    cargas.forEach(function (c) { if (c.fecha >= first.fecha && c.fecha < last.fecha) soles += Number(c.total); });
+    if (km <= 0 || !soles) return null;
+    return { porKm: soles / km, soles: soles, km: km, desde: first.fecha, dias: Math.max(1, K.d.diff(last.fecha, first.fecha)) };
+  },
+
+  kmList: function (entries, costo) {
     if (!entries.length) return K.empty('Sin registros de odómetro este mes');
     return '<div class="list">' + entries.slice().reverse().map(function (e) {
       var val = e.km == null ? 'Inicio' : '+' + K.n1(e.km) + ' km';
@@ -155,7 +195,8 @@ K.views.moto = {
         '<span class="item-ico">📍</span>' +
         '<span class="item-main"><b class="cap">' + K.esc(K.d.dayLabel(e.row.fecha)) + '</b>' +
           '<small>Odómetro ' + K.n1(e.row.odometro) + ' km' + (e.span > 1 ? ' · ' + e.span + ' días desde el anterior' : '') + '</small></span>' +
-        '<span class="item-val">' + val + '</span></button>';
+        '<span class="item-val right">' + val +
+          (e.km != null && costo ? '<small>≈ ' + K.money(e.km * costo.porKm) + '</small>' : '') + '</span></button>';
     }).join('') + '</div>';
   },
 

@@ -151,6 +151,15 @@ main { padding: 4px 16px calc(var(--safe-bottom) + 96px); max-width: 640px; marg
 .actions { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; margin-top: 12px; }
 .actions .btn { padding: 12px 8px; }
 .today-km .big { margin-top: 2px; }
+.daily {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: end;
+  background: color-mix(in srgb, var(--gastos) 12%, transparent); border-radius: 12px; padding: 10px 12px; margin-top: 12px;
+}
+.daily b { display: block; font-size: 22px; color: var(--gastos); }
+.daily b small { font-size: 13px; font-weight: 600; }
+.daily .right { text-align: right; }
+.daily .right b { font-size: 17px; }
+.daily p { grid-column: 1 / -1; margin: 4px 0 0; }
 .preview { background: var(--card); border-radius: 12px; padding: 10px 12px; margin: -4px 0 14px; font-size: 14px; line-height: 1.6; }
 .preview:empty { display: none; }
 .ok { color: var(--comidas); }
