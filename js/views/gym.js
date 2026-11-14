@@ -6,6 +6,39 @@ K.views.gym = {
   title: 'Gym',
   GRUPOS: ['Pecho', 'Espalda', 'Hombros', 'Bíceps', 'Tríceps', 'Antebrazo', 'Piernas', 'Glúteos', 'Pantorrillas', 'Abdomen', 'Cardio'],
 
+  // Color por grupo, en familias por zona del cuerpo
+  COLORES: {
+    'Pecho': '#ff5d6c', 'Hombros': '#ff9248',                          // torso (empuje): rojos / naranja
+    'Espalda': '#4aa8ff',                                               // espalda: azul
+    'Bíceps': '#a78bfa', 'Tríceps': '#7c6cff', 'Antebrazo': '#d4a5ff',  // brazos: morados
+    'Piernas': '#34d399', 'Glúteos': '#84cc16', 'Pantorrillas': '#c3f05a', // piernas: verdes
+    'Abdomen': '#ffd84a',                                               // core: amarillo
+    'Cardio': '#ff6fae'                                                 // cardio: rosa
+  },
+  color: function (g) { return K.views.gym.COLORES[g] || 'var(--gym)'; },
+
+  // Fondo con los colores de los grupos (dividido en franjas si son varios)
+  fondo: function (grupos) {
+    var V = K.views.gym, cs = [];
+    grupos.forEach(function (g) { var c = V.color(g); if (cs.indexOf(c) < 0) cs.push(c); });
+    cs = cs.slice(0, 4);
+    if (!cs.length) return 'var(--gym)';
+    if (cs.length === 1) return cs[0];
+    var step = 100 / cs.length;
+    return 'linear-gradient(135deg,' + cs.map(function (c, i) {
+      return c + ' ' + (i * step).toFixed(1) + '% ' + ((i + 1) * step).toFixed(1) + '%';
+    }).join(',') + ')';
+  },
+
+  // Etiquetas de colores con los grupos
+  tags: function (grupos) {
+    var V = K.views.gym;
+    if (!grupos || !grupos.length) return '<b>Entrenamiento</b>';
+    return '<span class="gtags">' + grupos.map(function (g) {
+      return '<span class="gtag" style="--c:' + V.color(g) + '">' + K.esc(g) + '</span>';
+    }).join('') + '</span>';
+  },
+
   // Estadísticas a partir de una lista de fechas (cualquier orden)
   stats: function (fechas) {
     var t = K.d.today(), set = {}, weeks = {};
@@ -48,10 +81,21 @@ K.views.gym = {
     // Calendario (lunes a domingo)
     var first = K.d.parse(r[0]), offset = (first.getDay() + 6) % 7, last = +r[1].slice(8), cells = '';
     for (var i = 0; i < offset; i++) cells += '<span></span>';
+    var conteo = {}; // días por grupo en el mes
     for (var d = 1; d <= last; d++) {
-      var f = ym + '-' + K.d.pad(d);
-      cells += '<button class="cal-day' + (byDay[f] ? ' on' : '') + (f === t ? ' today' : '') + '" data-day="' + f + '">' + d + '</button>';
+      var f = ym + '-' + K.d.pad(d), grupos = [];
+      (byDay[f] || []).forEach(function (x) {
+        x.grupos.forEach(function (g) { if (grupos.indexOf(g) < 0) grupos.push(g); });
+      });
+      grupos.forEach(function (g) { conteo[g] = (conteo[g] || 0) + 1; });
+      cells += '<button class="cal-day' + (byDay[f] ? ' on' : '') + (f === t ? ' today' : '') + '" data-day="' + f + '"' +
+        (byDay[f] ? ' style="background:' + V.fondo(grupos) + '"' : '') + '>' + d + '</button>';
     }
+    var leyenda = Object.keys(conteo).sort(function (a, b) {
+      return conteo[b] - conteo[a] || V.GRUPOS.indexOf(a) - V.GRUPOS.indexOf(b);
+    }).map(function (g) {
+      return '<span><i style="background:' + V.color(g) + '"></i>' + K.esc(g) + ' <b>' + conteo[g] + '</b></span>';
+    }).join('');
 
     root.innerHTML = K.monthNav(ym) +
       '<section class="card accent-gym">' +
@@ -65,11 +109,12 @@ K.views.gym = {
         '</div>' +
         '<div class="cal-head"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>' +
         '<div class="cal">' + cells + '</div>' +
+        (leyenda ? '<div class="legend">' + leyenda + '</div>' : '') +
       '</section>' +
       (rows.length ? '<div class="list">' + rows.map(function (x) {
         return '<button class="item" data-id="' + x.id + '">' +
-          '<span class="item-ico">🏋️</span>' +
-          '<span class="item-main"><b>' + K.esc(x.grupos.join(', ') || 'Entrenamiento') + '</b>' +
+          '<span class="gdot" style="background:' + V.fondo(x.grupos) + '"></span>' +
+          '<span class="item-main">' + V.tags(x.grupos) +
             '<small>' + K.esc(K.d.dayLabel(x.fecha) + ' · ' + V.summary(x) + (x.duracion ? ' · ' + x.duracion + ' min' : '')) + '</small></span>' +
           '</button>';
       }).join('') + '</div>' : K.empty('Sin entrenamientos este mes')) +
@@ -147,6 +192,11 @@ K.views.gym = {
           if (c) c.checked = true;
         }
         f.querySelectorAll('input[name="modo"]').forEach(function (r) { r.onchange = syncModo; });
+        // Cada chip de grupo con su color
+        f.querySelectorAll('input[name="grupos"]').forEach(function (i) {
+          i.parentNode.classList.add('gchip');
+          i.parentNode.style.setProperty('--c', V.color(i.value));
+        });
         syncModo(); renumber();
 
         f.querySelector('.ex-add').onclick = function () {

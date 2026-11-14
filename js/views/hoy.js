@@ -10,21 +10,28 @@ K.views.hoy = {
     var res = await Promise.all([
       K.db.list('gastos', r[0], r[1]),
       K.db.list('comidas', date, date),
-      K.db.kmAll(K.d.add(r[0], -62), date),
-      K.db.list('gym', K.d.add(date, -400), K.d.today(), 'id, fecha, grupos, modo, ejercicios, duracion, nota, created_at')
+      K.db.kmAll(K.d.add(r[0], -62), K.d.add(r[1], 62)),
+      K.db.list('gym', K.d.add(date, -400), K.d.today(), 'id, fecha, grupos, modo, ejercicios, duracion, nota, created_at'),
+      K.db.descansos(null, K.d.add(r[0], -62), K.d.add(r[1], 62))
     ]);
     var gastos = res[0], comidas = res[1], moto = res[2], gym = res[3];
     var sum = function (rows, k) { return rows.reduce(function (s, x) { return s + Number(x[k] || 0); }, 0); };
     var gHoy = gastos.filter(function (x) { return x.fecha === date; });
-    // Km por lectura = odómetro − lectura anterior de la misma moto
-    var porMoto = {}, kmHoy = 0, kmMes = 0, mHoy = [];
+    // Km por día de cada moto, repartidos entre los días sin contar los "No recorrido"
+    var porMoto = {}, libresPorMoto = {}, kmHoy = 0, kmMes = 0, mHoy = [], libreHoy = false;
     moto.forEach(function (x) { (porMoto[x.moto_id] = porMoto[x.moto_id] || []).push(x); });
+    res[4].forEach(function (x) {
+      (libresPorMoto[x.moto_id] = libresPorMoto[x.moto_id] || {})[x.fecha] = x;
+      if (x.fecha === date) libreHoy = true;
+    });
     Object.keys(porMoto).forEach(function (id) {
-      K.views.moto.days(porMoto[id], null).forEach(function (e) {
-        if (e.km == null) return;
-        if (K.d.ym(e.row.fecha) === ym) kmMes += e.km;
-        if (e.row.fecha === date) { kmHoy += e.km; mHoy.push(e); }
-      });
+      var rep = K.views.moto.reparto(porMoto[id], null, libresPorMoto[id] || {});
+      Object.keys(rep.porDia).forEach(function (f) { if (K.d.ym(f) === ym) kmMes += rep.porDia[f]; });
+      if (rep.porDia[date] != null) {
+        kmHoy += rep.porDia[date];
+        var e = rep.entries.filter(function (x) { return x.row.fecha >= date && x.km != null; })[0];
+        mHoy.push({ km: rep.porDia[date], reg: e && e.row.fecha === date ? e : null });
+      }
     });
     var gymHoy = gym.filter(function (x) { return x.fecha === date; });
     var st = K.views.gym.stats(gym.map(function (x) { return x.fecha; }));
@@ -48,8 +55,8 @@ K.views.hoy = {
         // Moto
         '<section class="tile accent-moto" data-go="moto">' +
           '<div class="tile-top"><span>🏍️ Moto</span><button class="mini-add" data-quick="moto">＋</button></div>' +
-          '<div class="big">' + K.n1(kmHoy) + ' <small>km</small></div>' +
-          '<div class="muted small">mes ' + K.n1(kmMes) + ' km</div>' +
+          '<div class="big">' + (libreHoy && !mHoy.length ? '😴' : K.n1(kmHoy) + ' <small>km</small>') + '</div>' +
+          '<div class="muted small">' + (libreHoy && !mHoy.length ? 'no recorrido · ' : '') + 'mes ' + K.n1(kmMes) + ' km</div>' +
         '</section>' +
         // Gym
         '<section class="tile accent-gym" data-go="gym">' +
@@ -79,15 +86,16 @@ K.views.hoy = {
             '<span class="item-main"><b>' + K.esc(x.nota || x.categoria) + '</b><small>Gasto</small></span>' +
             '<span class="item-val">' + K.money(x.monto) + '</span></div>';
         }).join('') +
-        mHoy.map(function (e) {
+        mHoy.map(function (m) {
           return '<div class="item static"><span class="item-ico">🏍️</span>' +
-            '<span class="item-main"><b>Recorrido</b><small>Odómetro ' + K.n1(e.row.odometro) + ' km' +
-              (e.span > 1 ? ' · ' + e.span + ' días' : '') + '</small></span>' +
-            '<span class="item-val">+' + K.n1(e.km) + ' km</span></div>';
+            '<span class="item-main"><b>Recorrido</b><small>' + (m.reg
+              ? 'Odómetro ' + K.n1(m.reg.row.odometro) + ' km' + (m.reg.dias > 1 ? ' · +' + K.n1(m.reg.km) + ' km en ' + m.reg.dias + ' días' : '')
+              : 'Sin registro · km repartidos') + '</small></span>' +
+            '<span class="item-val">+' + K.n1(m.km) + ' km</span></div>';
         }).join('') +
         gymHoy.map(function (x) {
-          return '<div class="item static"><span class="item-ico">🏋️</span>' +
-            '<span class="item-main"><b>' + K.esc(x.grupos.join(', ') || 'Entrenamiento') + '</b><small>' + K.esc(K.views.gym.summary(x)) + '</small></span></div>';
+          return '<div class="item static"><span class="gdot" style="background:' + K.views.gym.fondo(x.grupos) + '"></span>' +
+            '<span class="item-main">' + K.views.gym.tags(x.grupos) + '<small>' + K.esc(K.views.gym.summary(x)) + '</small></span></div>';
         }).join('') +
       '</div>' : K.empty('Nada registrado todavía. Toca ＋ en cualquier tarjeta 👆'));
 

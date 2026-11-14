@@ -29,18 +29,34 @@ K.views.moto = {
     return [m.marca, m.modelo, m.anio].filter(Boolean).join(' ');
   },
 
-  // Lecturas ascendentes → [{row, km, span}] (km = diferencia con la lectura anterior; null si es la primera)
-  days: function (rows, prev) {
-    var last = prev, out = [];
+  // Reparte los km de cada lectura en partes iguales entre los días desde la lectura anterior,
+  // sin contar los días "No recorrido" (libres = { 'AAAA-MM-DD': true }).
+  // Ej.: 15 → 17 con +60 km: 16 y 17 quedan con 30 km; si el 16 es "No recorrido", el 17 queda con 60.
+  // rows: lecturas ascendentes de UNA moto; prev: la lectura anterior a rows[0] (o null).
+  // → { porDia: {fecha: km}, entries: [{row, km, span, dias}] }  (km = total del registro, dias = días entre los que se reparte)
+  reparto: function (rows, prev, libres) {
+    var porDia = {}, entries = [], last = prev;
     rows.forEach(function (r) {
-      out.push({
-        row: r,
-        km: last ? Math.round((Number(r.odometro) - Number(last.odometro)) * 10) / 10 : null,
-        span: last ? K.d.diff(r.fecha, last.fecha) : 0
-      });
+      var e = { row: r, km: null, span: 0, dias: 0 };
+      if (last) {
+        e.km = Math.round((Number(r.odometro) - Number(last.odometro)) * 10) / 10;
+        e.span = K.d.diff(r.fecha, last.fecha);
+        var ds = [];
+        for (var f = K.d.add(last.fecha, 1); f <= r.fecha; f = K.d.add(f, 1)) {
+          if (f === r.fecha || !libres[f]) ds.push(f);
+        }
+        e.dias = ds.length;
+        ds.forEach(function (f) { porDia[f] = (porDia[f] || 0) + e.km / ds.length; });
+      }
+      entries.push(e);
       last = r;
     });
-    return out;
+    return { porDia: porDia, entries: entries };
+  },
+  libresMap: function (rows) {
+    var m = {};
+    rows.forEach(function (x) { m[x.fecha] = x; });
+    return m;
   },
 
   render: async function (root) {
@@ -66,16 +82,22 @@ K.views.moto = {
       K.db.kmNeighbors(moto.id, t)
     ]);
     var km = res[0], hoy = res[2];
+    // Días "No recorrido" que afectan al mes elegido y a hoy
+    var dFrom = [km.prev ? km.prev.fecha : r[0], hoy.prev ? hoy.prev.fecha : t].sort()[0];
+    var dTo = [km.next ? km.next.fecha : r[1], t].sort()[1];
+    var libres = V.libresMap(await K.db.descansos(moto.id, dFrom, dTo));
+
     var precios = (res[1].prev ? [res[1].prev] : []).concat(res[1].rows);
     var cg = { rows: res[1].rows.filter(function (c) { return c.fecha <= r[1]; }), prev: res[1].prev };
     var rend = Number(moto.rendimiento) || 0;
     // Costo por km de una fecha (precio de la última recarga hasta ese día ÷ rendimiento)
     var costoEn = function (fecha) { return V.costoKm(precios, fecha, rend); };
-    var entries = V.days(km.rows, km.prev);
 
-    // Kilometraje del mes
-    var kmMes = 0, dias = 0;
-    entries.forEach(function (e) { if (e.km != null) { kmMes += e.km; dias += e.span; } });
+    // Kilometraje del mes: km repartidos por día (la 1ª lectura del mes siguiente puede repartir km en los últimos días de este)
+    var rep = V.reparto(km.rows.concat(km.next ? [km.next] : []), km.prev, libres);
+    var kmMes = 0, dias = 0, libresMes = 0;
+    Object.keys(rep.porDia).forEach(function (f) { if (f >= r[0] && f <= r[1]) { kmMes += rep.porDia[f]; dias++; } });
+    Object.keys(libres).forEach(function (f) { if (f >= r[0] && f <= r[1] && f <= t) libresMes++; });
     var lastRead = km.rows.length ? km.rows[km.rows.length - 1] : km.prev;
 
     // Combustible del mes
@@ -84,13 +106,17 @@ K.views.moto = {
     var ultima = cg.rows[cg.rows.length - 1] || null;
     var antes = cg.rows.length > 1 ? cg.rows[cg.rows.length - 2] : cg.prev;
 
-    // Estado de hoy
-    var hoyKm = hoy.same && hoy.prev ? Number(hoy.same.odometro) - Number(hoy.prev.odometro) : null;
+    // Estado de hoy: hoyRep = el registro de hoy; hoyKm = la parte que le toca a hoy
+    var hoyRep = hoy.same && hoy.prev ? V.reparto([hoy.same], hoy.prev, libres).entries[0] : null;
+    var hoyKm = hoyRep ? hoyRep.km / hoyRep.dias : null;
+    var hoyLibre = !hoy.same && libres[t];
     var tab = K.state.motoTab || 'km';
 
-    // Gasto diario aprox. = km por día del mes × costo por km (con el precio vigente al final del mes)
+    // Gasto diario aprox. = km por día recorrido del mes × costo por km (con el precio vigente al final del mes)
     var costo = costoEn(r[1] < t ? r[1] : t);
     var diario = costo && dias ? (kmMes / dias) * costo.porKm : null;
+    // Al mes "a este ritmo": contando también los días que no saliste
+    var alMes = diario != null ? kmMes / (dias + libresMes) * 30 * costo.porKm : null;
     var hoyCosto = hoyKm != null ? costoEn(t) : null;
 
     root.innerHTML =
@@ -105,26 +131,33 @@ K.views.moto = {
         (hoy.same
           ? '<div class="big">' + (hoyKm != null ? '+' + K.n1(hoyKm) + ' <small>km</small>' : K.n1(hoy.same.odometro) + ' <small>km</small>') + '</div>' +
             '<div class="muted small">Odómetro: ' + K.n1(hoy.same.odometro) + ' km' +
-              (hoy.prev && K.d.diff(t, hoy.prev.fecha) > 1 ? ' · desde ' + K.esc(K.d.dayLabel(hoy.prev.fecha)) : '') +
+              (hoyRep && hoyRep.dias > 1 ? ' · +' + K.n1(hoyRep.km) + ' km desde ' + K.esc(K.d.dayLabel(hoy.prev.fecha)) + ', repartidos en ' + hoyRep.dias + ' días' : '') +
+              (hoyRep && hoyRep.dias === 1 && hoyRep.span > 1 ? ' · desde ' + K.esc(K.d.dayLabel(hoy.prev.fecha)) + ' (los demás días: no recorrido)' : '') +
               (hoyKm == null ? ' · punto de partida' : '') +
               (hoyCosto ? ' · ≈ <b class="txt">' + K.money(hoyKm * hoyCosto.porKm) + '</b> en combustible' : '') + '</div>'
-          : '<div class="muted">Aún no registras el odómetro de hoy' +
-              (hoy.prev ? ' · último: ' + K.n1(hoy.prev.odometro) + ' km (' + K.esc(K.d.dayLabel(hoy.prev.fecha)) + ')' : '') + '</div>') +
+          : hoyLibre
+            ? '<div class="big">😴 <small>No recorrido</small></div><div class="muted small">Hoy no saliste en la moto</div>'
+            : '<div class="muted">Aún no registras el odómetro de hoy' +
+                (hoy.prev ? ' · último: ' + K.n1(hoy.prev.odometro) + ' km (' + K.esc(K.d.dayLabel(hoy.prev.fecha)) + ')' : '') + '</div>') +
         '<div class="actions">' +
-          '<button class="btn primary" data-km>📍 ' + (hoy.same ? 'Actualizar odómetro' : 'Registrar odómetro') + '</button>' +
+          (hoyLibre
+            ? '<button class="btn" data-unlibre>Quitar "No recorrido"</button>'
+            : '<button class="btn primary" data-km>📍 ' + (hoy.same ? 'Actualizar odómetro' : 'Registrar odómetro') + '</button>') +
           '<button class="btn" data-carga>⛽ Recarga</button>' +
         '</div>' +
+        (!hoy.same && !hoyLibre && hoy.prev ? '<button class="link-btn libre-link" data-libre>😴 Hoy no salí</button>' : '') +
       '</section>' +
 
       K.monthNav(ym) +
       '<section class="card accent-moto">' +
         '<div class="big">' + K.n1(kmMes) + ' <small>km en el mes</small></div>' +
-        '<div class="muted">' + (dias ? '≈ ' + K.n1(kmMes / dias) + ' km por día (' + dias + ' día' + (dias === 1 ? '' : 's') + ' medidos)' : 'Registra el odómetro dos días para ver tu promedio') + '</div>' +
+        '<div class="muted">' + (dias ? '≈ ' + K.n1(kmMes / dias) + ' km por día recorrido (' + dias + ' día' + (dias === 1 ? '' : 's') +
+          (libresMes ? ' · ' + libresMes + ' sin salir' : '') + ')' : 'Registra el odómetro dos días para ver tu promedio') + '</div>' +
         '<div class="daily">' +
           (diario != null
             ? '<div><span class="muted small">Gasto diario en combustible</span><b>≈ ' + K.money(diario) + ' <small>/día</small></b></div>' +
               '<div class="right"><span class="muted small">por km</span><b>' + K.money(costo.porKm) + '</b></div>' +
-              '<p class="muted small">≈ ' + K.money(diario * 30) + ' al mes · ' + K.money(costo.precio) + '/gal ÷ ' + K.n1(rend) + ' km/gal</p>'
+              '<p class="muted small">≈ ' + K.money(alMes) + ' al mes a este ritmo · ' + K.money(costo.precio) + '/gal ÷ ' + K.n1(rend) + ' km/gal</p>'
             : '<p class="muted small">💸 ' + (!rend
                 ? 'Agrega el <b class="txt">rendimiento</b> de tu moto (km por galón de la ficha técnica) para calcular tu gasto diario. <button type="button" class="link-btn" data-rend>Agregar</button>'
                 : !precios.length ? 'Registra una recarga para conocer el precio del galón y calcular tu gasto diario.'
@@ -144,13 +177,23 @@ K.views.moto = {
         '<label><input type="radio" name="mtab" value="km"' + (tab === 'km' ? ' checked' : '') + '><span>Recorridos</span></label>' +
         '<label><input type="radio" name="mtab" value="cargas"' + (tab === 'cargas' ? ' checked' : '') + '><span>Recargas</span></label>' +
       '</div>' +
-      (tab === 'km' ? V.kmList(entries, costoEn) : V.cargasList(cg.rows, cg.prev));
+      (tab === 'km'
+        ? V.kmList({ rep: rep, rows: km.rows, prev: km.prev, libres: libres, desde: r[0], hasta: r[1] < t ? r[1] : t, costoEn: costoEn })
+        : V.cargasList(cg.rows, cg.prev));
 
     K.bindNav(root);
     root.querySelector('[data-motos]').onclick = function () { V.motosSheet(motos, moto); };
     var br = root.querySelector('[data-rend]');
     if (br) br.onclick = function () { V.motoForm(moto); };
-    root.querySelector('[data-km]').onclick = function () { V.kmForm(moto, null, t); };
+    var bk = root.querySelector('[data-km]');
+    if (bk) bk.onclick = function () { V.kmForm(moto, null, t); };
+    var bl = root.querySelector('[data-libre]');
+    if (bl) bl.onclick = function () { V.setLibre(moto, t, true); };
+    var bu = root.querySelector('[data-unlibre]');
+    if (bu) bu.onclick = function () { V.setLibre(moto, t, false); };
+    root.querySelectorAll('[data-day]').forEach(function (b) {
+      b.onclick = function () { V.dayActions(moto, b.dataset.day, !!libres[b.dataset.day]); };
+    });
     root.querySelector('[data-carga]').onclick = function () { V.cargaForm(moto, null); };
     root.querySelectorAll('input[name="mtab"]').forEach(function (i) {
       i.onchange = function () { K.state.motoTab = i.value; K.app.render(); };
@@ -181,18 +224,78 @@ K.views.moto = {
     return { precio: precio, porKm: precio / rend };
   },
 
-  kmList: function (entries, costoEn) {
-    if (!entries.length) return K.empty('Sin registros de odómetro este mes');
-    return '<div class="list">' + entries.slice().reverse().map(function (e) {
-      var val = e.km == null ? 'Inicio' : '+' + K.n1(e.km) + ' km';
-      var costo = e.km != null ? costoEn(e.row.fecha) : null;
-      return '<button class="item" data-kid="' + e.row.id + '">' +
-        '<span class="item-ico">📍</span>' +
-        '<span class="item-main"><b class="cap">' + K.esc(K.d.dayLabel(e.row.fecha)) + '</b>' +
-          '<small>Odómetro ' + K.n1(e.row.odometro) + ' km' + (e.span > 1 ? ' · ' + e.span + ' días desde el anterior' : '') + '</small></span>' +
-        '<span class="item-val right">' + val +
-          (costo ? '<small>≈ ' + K.money(e.km * costo.porKm) + '</small>' : '') + '</span></button>';
-    }).join('') + '</div>';
+  // Lista día por día del mes: con odómetro (📍), "No recorrido" (😴) o sin registro (❔)
+  // o: { rep, rows, prev, libres, desde, hasta, costoEn }
+  kmList: function (o) {
+    var entryBy = {};
+    o.rep.entries.forEach(function (e) { entryBy[e.row.fecha] = e; });
+    // Si no hay lecturas antes del mes, la lista empieza en la primera lectura (punto de partida)
+    var start = o.prev ? o.desde : (o.rows[0] ? o.rows[0].fecha : null);
+    var html = '';
+    for (var f = o.hasta; start && f >= start; f = K.d.add(f, -1)) {
+      var e = entryBy[f], share = o.rep.porDia[f], costo = share != null ? o.costoEn(f) : null;
+      var plata = costo ? '<small>≈ ' + K.money(share * costo.porKm) + '</small>' : '';
+      var dia = '<b class="cap">' + K.esc(K.d.dayLabel(f)) + '</b>';
+      if (e) {
+        html += '<button class="item" data-kid="' + e.row.id + '">' +
+          '<span class="item-ico">📍</span>' +
+          '<span class="item-main">' + dia + '<small>Odómetro ' + K.n1(e.row.odometro) + ' km' +
+            (e.km == null ? ' · punto de partida' : e.dias > 1 ? ' · +' + K.n1(e.km) + ' km repartidos en ' + e.dias + ' días' : '') + '</small></span>' +
+          '<span class="item-val right">' + (e.km == null ? 'Inicio' : '+' + K.n1(share) + ' km' + plata) + '</span></button>';
+      } else if (o.libres[f]) {
+        html += '<button class="item libre" data-day="' + f + '">' +
+          '<span class="item-ico">😴</span>' +
+          '<span class="item-main">' + dia + '<small>No recorrido</small></span>' +
+          '<span class="item-val muted">0 km</span></button>';
+      } else {
+        html += '<button class="item pendiente" data-day="' + f + '">' +
+          '<span class="item-ico">❔</span>' +
+          '<span class="item-main">' + dia + '<small>' + (share != null ? 'Sin registro · km repartidos del siguiente' : 'Sin registro · toca si no saliste') + '</small></span>' +
+          '<span class="item-val right' + (share != null ? '' : ' muted') + '">' + (share != null ? '≈ ' + K.n1(share) + ' km' + plata : '—') + '</span></button>';
+      }
+    }
+    return html ? '<div class="list">' + html + '</div>' : K.empty('Sin registros de odómetro este mes');
+  },
+
+  // ───────── Días "No recorrido" ─────────
+  setLibre: async function (moto, fecha, on) {
+    try {
+      if (on) {
+        var nb = await K.db.kmNeighbors(moto.id, fecha);
+        if (nb.same) throw new Error('Ese día tiene odómetro registrado (' + K.n1(nb.same.odometro) + ' km). Bórralo primero si no saliste.');
+        if (fecha > K.d.today()) throw new Error('Solo puedes marcar días que ya pasaron');
+        await K.db.insert('moto_descanso', { moto_id: moto.id, fecha: fecha });
+        K.toast('😴 ' + K.d.dayLabel(fecha) + ': No recorrido · km recalculados');
+      } else {
+        await K.db.descansoQuitar(moto.id, fecha);
+        K.toast('Se quitó "No recorrido" · km recalculados');
+      }
+      K.sheet.close();
+      K.app.render();
+    } catch (err) {
+      K.toast(err.message, true);
+    }
+  },
+
+  dayActions: function (moto, fecha, libre) {
+    var V = K.views.moto, titulo = K.d.longLabel(fecha);
+    K.sheet.open({
+      title: titulo.charAt(0).toUpperCase() + titulo.slice(1),
+      submitLabel: 'Cerrar',
+      html: libre
+        ? '<p class="muted">Este día está marcado como <b class="txt">No recorrido</b>: no se le reparten km ni cuenta en tu promedio.</p>' +
+          '<button type="button" class="btn block" data-quitar>Quitar "No recorrido"</button>'
+        : '<p class="muted">No hay odómetro registrado este día. Si no saliste en la moto, márcalo y sus km se pasan a los días que sí saliste.</p>' +
+          '<button type="button" class="btn primary block" data-marcar>😴 Marcar como No recorrido</button>' +
+          '<button type="button" class="btn block" data-odo>📍 Registrar odómetro de este día</button>',
+      mount: function (f) {
+        var q = function (s) { return f.querySelector(s); };
+        if (q('[data-quitar]')) q('[data-quitar]').onclick = function () { V.setLibre(moto, fecha, false); };
+        if (q('[data-marcar]')) q('[data-marcar]').onclick = function () { V.setLibre(moto, fecha, true); };
+        if (q('[data-odo]')) q('[data-odo]').onclick = function () { V.kmForm(moto, null, fecha); };
+      },
+      submit: function () { K.sheet.close(); return false; }
+    });
   },
 
   cargasList: function (rows, prev) {
@@ -349,6 +452,8 @@ K.views.moto = {
           await K.db.insert('moto_km', { moto_id: moto.id, fecha: fecha, odometro: odo });
           K.toast('Odómetro guardado' + prevKm + ' 📍');
         }
+        // Si ese día estaba como "No recorrido", ya no lo está
+        await K.db.descansoQuitar(moto.id, fecha);
       },
       onDelete: row.id ? function () { return K.db.remove('moto_km', row.id).then(function () { K.toast('Registro eliminado'); }); } : null
     });

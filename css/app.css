@@ -168,13 +168,31 @@ main { padding: 4px 16px calc(var(--safe-bottom) + 96px); max-width: 640px; marg
 .txt { color: var(--text); }
 .cap { text-transform: capitalize; }
 .item-val.right { text-align: right; }
+.libre-link { display: block; margin: 10px auto 0; font-size: 14px; }
+.item.libre { opacity: .7; }
+.item.pendiente .item-ico { opacity: .6; }
 .item-val small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
 
 /* ───────── Calendario gym ───────── */
 .cal-head, .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; }
 .cal-head { margin-top: 14px; font-size: 11px; color: var(--muted); }
 .cal-day { border: 0; background: var(--card2); border-radius: 8px; aspect-ratio: 1; font-size: 13px; padding: 0; }
-.cal-day.on { background: var(--gym); color: #fff; font-weight: 700; }
+.cal-day.on { background: var(--gym); color: #14121c; font-weight: 800; }
+
+/* Colores por grupo muscular */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; }
+.legend b { color: var(--text); }
+.gdot { width: 28px; height: 28px; border-radius: 9px; flex: none; }
+.gtags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 3px; }
+.gtag {
+  font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  color: var(--c); background: color-mix(in srgb, var(--c) 18%, transparent);
+}
+@media (prefers-color-scheme: light) { .gtag { color: color-mix(in srgb, var(--c) 55%, #000); } }
+.chip.gchip span { border-color: color-mix(in srgb, var(--c) 45%, var(--line)); }
+.chip.gchip input:checked + span { background: var(--c); border-color: var(--c); color: #14121c; font-weight: 600; }
 .cal-day.today { outline: 2px solid var(--text); outline-offset: -2px; }
 
 /* ───────── Botones ───────── */

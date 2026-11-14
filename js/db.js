@@ -63,13 +63,24 @@ K.db = {
   motos: async function () {
     return K.db._check(await K.db.client.from('motos').select('*').order('created_at', { ascending: true }));
   },
-  // Lecturas de odómetro de una moto entre dos fechas (ascendente) + la última anterior a "from"
+  // Lecturas de odómetro de una moto entre dos fechas (ascendente) + la última anterior a "from" y la primera posterior a "to"
   kmRange: async function (motoId, from, to) {
     var c = K.db.client, res = await Promise.all([
       c.from('moto_km').select('*').eq('moto_id', motoId).gte('fecha', from).lte('fecha', to).order('fecha', { ascending: true }),
-      c.from('moto_km').select('*').eq('moto_id', motoId).lt('fecha', from).order('fecha', { ascending: false }).limit(1)
+      c.from('moto_km').select('*').eq('moto_id', motoId).lt('fecha', from).order('fecha', { ascending: false }).limit(1),
+      c.from('moto_km').select('*').eq('moto_id', motoId).gt('fecha', to).order('fecha', { ascending: true }).limit(1)
     ]);
-    return { rows: K.db._check(res[0]), prev: K.db._check(res[1])[0] || null };
+    return { rows: K.db._check(res[0]), prev: K.db._check(res[1])[0] || null, next: K.db._check(res[2])[0] || null };
+  },
+  // Días "No recorrido" entre dos fechas (de una moto, o de todas si motoId es null)
+  descansos: async function (motoId, from, to) {
+    var q = K.db.client.from('moto_descanso').select('*').gte('fecha', from).lte('fecha', to);
+    if (motoId) q = q.eq('moto_id', motoId);
+    return K.db._check(await q.order('fecha', { ascending: true }));
+  },
+  // Quita el "No recorrido" de un día (al registrar odómetro ese día)
+  descansoQuitar: async function (motoId, fecha) {
+    return K.db._check(await K.db.client.from('moto_descanso').delete().eq('moto_id', motoId).eq('fecha', fecha));
   },
   // Lecturas vecinas de una fecha: la anterior, la del mismo día y la siguiente
   kmNeighbors: async function (motoId, fecha) {
